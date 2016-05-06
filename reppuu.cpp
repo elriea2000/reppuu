@@ -1,5 +1,5 @@
 /*
- * 制空値最適化プログラム“烈風拳であります！” v0.1
+ * 制空値最適化プログラム“烈風拳であります！” v0.2
  * This source and related resources are available under BSD License.
  * Copyright (c) 2016-, suzuryo All rights reserved.
  */
@@ -165,30 +165,54 @@ Conf conf;
 //int ks[3]={10,1,1};
 
 //DPテーブル
-int dp[4*6+1][1<<(4*6)];
+//int dp[4*6+1][1<<(4*6)];
 //メモ化再帰で全探索
 //艦数(<6)，見ているスロット，採用状態，制空値データ
-void calcAllPattern_r(int n, int head, unsigned int stat, std::vector<std::vector<int> > &kantai_s){
-	if(head<4*n){
-		int nstat;
-		//立てない場合
-		nstat=stat;
-		if(dp[head+1][nstat]==-1){
-			dp[head+1][nstat]=(head<0?0:dp[head][stat]);
-			calcAllPattern_r(n,head+1, nstat, kantai_s);
-		}
-		//立てる場合
-		int c=head%4;
-		int r=head/4;
-		if(kantai_s[r][c]>0 && dp[head][stat]<=conf.maxmargin){ //艦載機数0はやらない and 制空値上限過ぎたらもう立てない
-			nstat=stat|(1<<head);
-			if(dp[head+1][nstat]==-1){
-				dp[head+1][nstat]=(head<0?0:dp[head][stat])+kantai_s[r][c];
-				calcAllPattern_r(n,head+1, nstat, kantai_s);
-			}
-		}
+//~ void calcAllPattern_r(int n, int head, unsigned int stat, std::vector<std::vector<int> > &kantai_s){
+	//~ if(head<4*n){
+		//~ int nstat;
+		//~ //立てない場合
+		//~ nstat=stat;
+		//~ if(dp[head+1][nstat]==-1){
+			//~ dp[head+1][nstat]=(head<0?0:dp[head][stat]);
+			//~ calcAllPattern_r(n,head+1, nstat, kantai_s);
+		//~ }
+		//~ //立てる場合
+		//~ int c=head%4;
+		//~ int r=head/4;
+		//~ if(kantai_s[r][c]>0 && dp[head][stat]<=conf.maxmargin){ //艦載機数0はやらない and 制空値上限過ぎたらもう立てない
+			//~ nstat=stat|(1<<head);
+			//~ if(dp[head+1][nstat]==-1){
+				//~ dp[head+1][nstat]=(head<0?0:dp[head][stat])+kantai_s[r][c];
+				//~ calcAllPattern_r(n,head+1, nstat, kantai_s);
+			//~ }
+		//~ }
+	//~ }
+//~ }
+
+
+int dp2[1<<(4*6)];
+void calcAllPattern_r_2(int n,int head, unsigned int stat, int val, std::vector<std::vector<int> > &kantai_s){
+	if(head>=4*n){ //メモって終了
+		dp2[stat]=val; //やっぱり2^(4*n)必要 最大2^24 -> 64MB
+		return;
 	}
+	
+	int c=head%4;
+	int r=head/4;
+	
+	//立てない
+	calcAllPattern_r_2(n,head+1,stat,val,kantai_s);
+	
+	//1立てる
+	//つーかtargetを超えたら打ち切りでいいじゃん
+	if(kantai_s[r][c]>0 && val<conf.target)
+		calcAllPattern_r_2(n,head+1,stat|(1<<head),val+kantai_s[r][c],kantai_s);
+	
+	//2立てる...
+	
 }
+
 
 
 //候補表示のための構造体
@@ -223,17 +247,15 @@ int main(int argc, char **argv){
 	}
 	
 	//全探索
-	memset(dp,-1,sizeof(dp));
-	dp[0][0]=0;
-	calcAllPattern_r(conf.knum,0,0,conf.acpow);
+	//~ memset(dp,-1,sizeof(dp));
+	//~ dp[0][0]=0;
+	//~ calcAllPattern_r(conf.knum,0,0,conf.acpow);
+	calcAllPattern_r_2(conf.knum,0,0,0,conf.acpow);
 	
 	//パラメータ
-	static const int CAND_NUM=20; //表示する候補数
 	std::priority_queue<Res> q;
 	
-	static const int imag_target=182; //目標の制空値
-	static const double marginrate=1.1; //多めに見積もる比率
-	static const int target=imag_target*marginrate; //実際の目標制空値
+	int target=conf.target*conf.marginrate; //実際の目標制空値
 	
 	int min=1<<30;
 	unsigned int minstat=0;
@@ -243,22 +265,25 @@ int main(int argc, char **argv){
 	for(int i=0;i<(1<<(4*conf.knum));++i){
 		char tmp[256];
 		sprintf(tmp,"%%0%dx %%d\n",conf.knum);
-		if(fp) fprintf(fp,tmp,bitrev(i,4*conf.knum),dp[4*conf.knum][i]);
-		int diff=dp[4*conf.knum][i]-target;
+		//if(fp) fprintf(fp,tmp,bitrev(i,4*conf.knum),dp[4*conf.knum][i]);
+		if(fp) fprintf(fp,tmp,bitrev(i,4*conf.knum),dp2[i]);
+		//int diff=dp[4*conf.knum][i]-target;
+		int diff=dp2[i]-target;
 		if(diff>=0){
 			q.push(Res(diff,i));
-			if(q.size()>CAND_NUM) q.pop();
+			if(q.size()>conf.candNum) q.pop();
 		}
 	}
 	if(fp) fclose(fp);
 	
 	//表示
-	printf("top %d candidates: \n",CAND_NUM);
+	printf("top %d candidates: \n",conf.candNum);
 	while(!q.empty()){
 		Res r=q.top(); q.pop();
 		char tmp[256];
 		sprintf(tmp,"%%0%dx %%d %%d / %%d\n",conf.knum);
-		printf(tmp,bitrev(r.stat,4*conf.knum),bitcount(r.stat),dp[4*conf.knum][r.stat],target);
+		//printf(tmp,bitrev(r.stat,4*conf.knum),bitcount(r.stat),dp[4*conf.knum][r.stat],target);
+		printf(tmp,bitrev(r.stat,4*conf.knum),bitcount(r.stat),dp2[r.stat],target);
 	}
 	
 	//キー入力待ち
